@@ -1,0 +1,123 @@
+1.自定义ListField
+
+新建fields.py文件
+
+# encoding: utf-8
+from django.db import models
+import ast
+
+class ListField(models.TextField):
+
+        description = "just a listfield"
+
+        def __init__(self, *args, **kwargs):
+                super(ListField, self).__init__(*args, **kwargs)
+
+        #转换数据库中的数据到python变量
+        def from_db_value(self, value, expression, conn, context):
+                print("from_db_value")
+                if not value:
+                        value=[]
+                if isinstance(value, list):
+                        return value
+                print("value type", type(value))
+                #把数据还原成它能转换的数据类型
+                return ast.literal_eval(value)
+
+        #将python变量处理后保存到数据库
+        def get_prep_value(self, value):
+                print("get_prep_value")
+                if not value:
+                        return value
+                print("value type",type(value))
+                return str(value)
+
+在models.py文件添加含有ListField字段的模型
+class ListTest(models.Model):
+        labels = ListField()
+
+        def __str__(self):
+                return "%s " % self.labels
+
+在views.py文件中使用模型
+
+def testlist(request):
+        test = ListTest()
+        test.labels = ["python","django"]
+        test.labels.append("cityking")
+        test.save()
+
+        obs = ListTest.objects.all()
+        for ob in obs:
+                print(ob.labels)
+        return HttpResponseRedirect("/")
+
+
+2.自定义FileField
+from django.forms import ValidationError
+class ContextTypeRestrictedFileField(models.FileField):
+        def __init__(self, context_type=None, max_upload_size=None, **kwargs):
+                self.context_type = context_type
+                self.max_upload_size = max_upload_size
+                super(ContextTypeRestrictedFileField, self).__init__(**kwargs)
+        def clean(self, *args, **kwargs):
+                data = super(ContextTypeRestrictedFileField, self).clean(*args, **kwargs)
+                #import pdb
+                #pdb.set_trace()
+                file = data.file
+                try:
+                        type = file.content_type
+                        if type != self.context_type:
+                                raise ValidationError("context_type error")
+                        if file.size > self.max_upload_size:
+                                raise ValidationError("exceed max uploadsize")
+                except AttributeError:
+                        print("error")
+                        pass
+                return data
+
+模型中定义含有ContextTypeRestrictedFileField的模型
+
+class AddPdfFileModel(models.Model):
+        name = models.CharField(max_length=200)
+        file = ContextTypeRestrictedFileField(context_type='application/pdf',max_upload_size=2000, upload_to='pdf')
+        def __str__(self):
+                return self.name
+
+
+使用Form forms.py
+from django import forms
+from .models import AddPdfFileModel
+
+class AddPdfForm(forms.ModelForm):
+        class Meta:
+                model = AddPdfFileModel
+                fields = ['name', 'file']
+
+views.py
+def addfile(request):
+        if request.method == "POST":
+                form = forms.AddPdfForm(request.POST, request.FILES)#request.FILES接收文件
+                #import pdb
+                #pdb.set_trace()
+                if not form.is_valid():
+                        print(form.errors)
+                        return HttpResponseRedirect("/")
+                name = form.cleaned_data['name']
+                file = form.cleaned_data['file']
+                add_pdf_model = AddPdfFileModel(name=name, file=file)
+                add_pdf_model.save()
+        return render(request, "add.html", {'form':forms.AddPdfForm()})
+
+
+模板文件add.html
+<form action="." method="post" enctype="multipart/form-data">
+{% csrf_token %}
+{{ form.as_p }}
+<input type="submit" value="ok">
+</form>
+
+注意：enctype="multipart/form-data"为必须的
+
+
+
