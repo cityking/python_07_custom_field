@@ -1,0 +1,167 @@
+admin高级定制
+
+1.本地化--显示中文界面
+settings.py
+
+MIDDLEWARE = [
+    ...
+    'django.contrib.sessions.middleware.SessionMiddleware',
+    'django.middleware.locale.LocaleMiddleware',
+    ...
+]
+
+2.修改显示字段
+
+...
+from django.contrib.auth.admin import UserAdmin
+from django.contrib.auth.models import User
+
+#子类化UserAdmin
+class MyUserAdmin(UserAdmin):
+        list_display = ('email','first_name','last_name', 'is_staff')
+
+#先取消对User的注册再用MyUserAdmin对其重新注册
+admin.site.unregister(User)
+admin.site.register(User, MyUserAdmin)
+
+3.修改model的admin定制
+
+class PoemModelAdmin(admin.ModelAdmin):
+        class Meta:
+                model = Poem
+	#定义要显示的字段
+        list_display = ['title', 'author']
+	#定义要显示为链接的字段
+        list_display_links = ['author']
+	#定义搜索框
+        search_fields = ['title', 'author']
+	#定义可编辑的字段
+        list_editable = ['title']
+	#定义过滤器
+        list_filter = ['author']
+
+        #定义显示模板
+        change_form_template = 'change_form.html'
+admin.site.register(Poem, PoemModelAdmin)
+
+change_form.html
+
+{% extends 'admin/change_form.html' %}
+{% block form_top %}
+        <p>注意：不要写错</p>
+{% endblock %}
+
+4.自定义admin widget
+
+from django import forms
+from .models import Poem
+#自定义widget
+class SubInputText(forms.TextInput):
+        class Media:
+                css = {
+                        'all':('input.css',)
+                }
+class PoemForm(forms.ModelForm):
+        class Meta:
+                model = Poem
+                fields = ['author', 'title', 'type']
+                widgets = {
+                        #设置author的显示方式为文本域
+                        'author':forms.Textarea(attrs = {'cols':20, 'rows':1}),
+                        #设置title为自定义widget SubInputText
+                        'title':SubInputText()
+			#设置为单选按钮
+                        'type':forms.RadioSelect,
+
+                }
+
+
+class PoemModelAdmin(admin.ModelAdmin):
+        form = PoemForm
+admin.site.register(Poem, PoemModelAdmin)
+
+
+input.css
+input[type=text]{
+        background-color:yellow
+}
+
+
+设置action中间页面
+
+1.自定义form
+class SetTypeForm(forms.Form):
+        type = IntegerField()
+        #必需要有
+        _selected_action = forms.CharField(widget=MultipleHiddenInput)
+
+2.自定义显示中间页面的模板
+{% extends "admin/base_site.html" %}
+{% load i18n admin_urls %}
+
+{% block content%}
+        <form action="" method="post"> {% csrf_token %}
+        {{ form.as_p }}
+        <ul>
+                {% for ob in objects %}
+                        <li>{{ ob }}</li>
+                {% endfor %}
+        </ul>
+        </form>
+        <input type="hidden" name="action" value="set_type">
+        <input type="hidden" name="post" value="yes">
+        <input type="submit" name="apply" value="set">
+
+{% endblock %}
+
+3.在自定义ModelAdmin定义action set_type
+
+class PoemModelAdmin(admin.ModelAdmin):
+
+        #自定义action
+        def print_poem(self, request, queryset):
+                for qs in queryset:
+                        print(qs)
+
+        def set_type(self, request, queryset):
+                if request.POST.get('post'):
+                        form = SetTypeForm(request.POST)
+                        if form.is_valid():
+                                type = form.cleaned_data['type']
+                                for qs in queryset:
+                                        qs.type = type
+                                        qs.save()
+                                #设置action执行成功的消息提示
+                                self.message_user(request, "%d poems were changed type %d" % (len(queryset),type))
+                else:
+                        return render(request, 'set_type.html', {'form':SetTypeForm(initial={'_selected_action':request.POST.getlist(admin.ACTION_CHECKBOX_NAME)}),
+                                'objects':queryset})
+
+ 	#设置set_type action的显示名称
+        set_type.short_description = "set_type_action"
+
+        #删除不需要的全局action
+        def get_actions(self, request):
+                actions = super(PoemModelAdmin, self).get_actions(request)
+                if 'hello' in actions:
+                        del actions['hello']
+                return actions
+
+        form = PoemForm
+        actions = [print_poem,set_type]
+
+        #禁用所有action
+        #actions = None
+
+admin.site.register(Poem, PoemModelAdmin)
+
+#添加全局action
+def sayHello(modelname, request, queryset):
+        print('hello')
+admin.site.add_action(sayHello, 'hello')
+
+#全局禁止action
+admin.site.disable_action('delete_selected')
+
+
+
